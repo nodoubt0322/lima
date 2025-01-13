@@ -59,12 +59,13 @@ func DefaultPubKeys(loadDotSSH bool) ([]PubKey, error) {
 		if !errors.Is(err, os.ErrNotExist) {
 			return nil, err
 		}
-		if err := os.MkdirAll(configDir, 0700); err != nil {
+		if err := os.MkdirAll(configDir, 0o700); err != nil {
 			return nil, fmt.Errorf("could not create %q directory: %w", configDir, err)
 		}
 		if err := lockutil.WithDirLock(configDir, func() error {
-			keygenCmd := exec.Command("ssh-keygen", "-t", "ed25519", "-q", "-N", "", "-f",
-				filepath.Join(configDir, filenames.UserPrivateKey))
+			// no passphrase, no user@host comment
+			keygenCmd := exec.Command("ssh-keygen", "-t", "ed25519", "-q", "-N", "",
+				"-C", "lima", "-f", filepath.Join(configDir, filenames.UserPrivateKey))
 			logrus.Debugf("executing %v", keygenCmd.Args)
 			if out, err := keygenCmd.CombinedOutput(); err != nil {
 				return fmt.Errorf("failed to run %v: %q: %w", keygenCmd.Args, string(out), err)
@@ -221,15 +222,11 @@ func CommonOpts(useDotSSH bool) ([]string, error) {
 	return opts, nil
 }
 
-// SSHOpts adds the following options to CommonOptions: User, ControlMaster, ControlPath, ControlPersist
-func SSHOpts(instDir string, useDotSSH, forwardAgent bool, forwardX11 bool, forwardX11Trusted bool) ([]string, error) {
+// SSHOpts adds the following options to CommonOptions: User, ControlMaster, ControlPath, ControlPersist.
+func SSHOpts(instDir, username string, useDotSSH, forwardAgent, forwardX11, forwardX11Trusted bool) ([]string, error) {
 	controlSock := filepath.Join(instDir, filenames.SSHSock)
 	if len(controlSock) >= osutil.UnixPathMax {
 		return nil, fmt.Errorf("socket path %q is too long: >= UNIX_PATH_MAX=%d", controlSock, osutil.UnixPathMax)
-	}
-	u, err := osutil.LimaUser(false)
-	if err != nil {
-		return nil, err
 	}
 	opts, err := CommonOpts(useDotSSH)
 	if err != nil {
@@ -241,7 +238,7 @@ func SSHOpts(instDir string, useDotSSH, forwardAgent bool, forwardX11 bool, forw
 		controlPath = fmt.Sprintf(`ControlPath='%s'`, controlSock)
 	}
 	opts = append(opts,
-		fmt.Sprintf("User=%s", u.Username), // guest and host have the same username, but we should specify the username explicitly (#85)
+		fmt.Sprintf("User=%s", username), // guest and host have the same username, but we should specify the username explicitly (#85)
 		"ControlMaster=auto",
 		controlPath,
 		"ControlPersist=yes",
@@ -304,25 +301,30 @@ func detectValidPublicKey(content string) bool {
 	if strings.ContainsRune(content, '\n') {
 		return false
 	}
-	var spaced = strings.SplitN(content, " ", 3)
+	spaced := strings.SplitN(content, " ", 3)
 	if len(spaced) < 2 {
 		return false
 	}
-	var algo, base64Key = spaced[0], spaced[1]
-	var decodedKey, err = base64.StdEncoding.DecodeString(base64Key)
+	algo, base64Key := spaced[0], spaced[1]
+	decodedKey, err := base64.StdEncoding.DecodeString(base64Key)
 	if err != nil || len(decodedKey) < 4 {
 		return false
 	}
-	var sigLength = binary.BigEndian.Uint32(decodedKey)
+	sigLength := binary.BigEndian.Uint32(decodedKey)
 	if uint32(len(decodedKey)) < sigLength {
 		return false
 	}
-	var sigFormat = string(decodedKey[4 : 4+sigLength])
+	sigFormat := string(decodedKey[4 : 4+sigLength])
 	return algo == sigFormat
 }
 
 func detectAESAcceleration() bool {
 	if !cpu.Initialized {
+		if runtime.GOOS == "linux" && runtime.GOARCH == "arm64" {
+			// cpu.Initialized seems to always be false, even when the cpu.ARM64 struct is filled out
+			// it is only being set by readARM64Registers, but not by readHWCAP or readLinuxProcCPUInfo
+			return cpu.ARM64.HasAES
+		}
 		if runtime.GOOS == "darwin" && runtime.GOARCH == "arm64" {
 			// golang.org/x/sys/cpu supports darwin/amd64, linux/amd64, and linux/arm64,
 			// but apparently lacks support for darwin/arm64: https://github.com/golang/sys/blob/v0.5.0/cpu/cpu_arm64.go#L43-L60

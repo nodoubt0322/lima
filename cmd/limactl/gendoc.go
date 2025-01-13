@@ -61,10 +61,11 @@ func gendocAction(cmd *cobra.Command, args []string) error {
 		}
 	}
 	if output != "" && prefix != "" {
-		replaceAll(dir, output, prefix)
+		if err := replaceAll(dir, output, prefix); err != nil {
+			return err
+		}
 	}
-	replaceAll(dir, homeDir, "~")
-	return nil
+	return replaceAll(dir, homeDir, "~")
 }
 
 func genMan(cmd *cobra.Command, dir string) error {
@@ -86,7 +87,7 @@ and $LIMA_WORKDIR.
 **limactl**(1)
 `
 	out := md2man.Render([]byte(md))
-	if err := os.WriteFile(filePath, out, 0644); err != nil {
+	if err := os.WriteFile(filePath, out, 0o644); err != nil {
 		return err
 	}
 	// limactl(1)
@@ -99,7 +100,7 @@ and $LIMA_WORKDIR.
 
 func genDocsy(cmd *cobra.Command, dir string) error {
 	return doc.GenMarkdownTreeCustom(cmd.Root(), dir, func(s string) string {
-		//Replace limactl_completion_bash to completion bash for docsy title
+		// Replace limactl_completion_bash to completion bash for docsy title
 		name := filepath.Base(s)
 		name = strings.ReplaceAll(name, "limactl_", "")
 		name = strings.ReplaceAll(name, "_", " ")
@@ -110,14 +111,14 @@ weight: 3
 ---
 `, name)
 	}, func(s string) string {
-		//Use ../ for move one folder up for docsy
+		// Use ../ for move one folder up for docsy
 		return "../" + strings.TrimSuffix(s, filepath.Ext(s))
 	})
 }
 
-// replaceAll replaces all occurrences of new with old, for all files in dir
-func replaceAll(dir string, old, new string) error {
-	logrus.Infof("Replacing %q with %q", old, new)
+// replaceAll replaces all occurrences of text with replacement, for all files in dir.
+func replaceAll(dir, text, replacement string) error {
+	logrus.Infof("Replacing %q with %q", text, replacement)
 	return filepath.Walk(dir, func(path string, info fs.FileInfo, err error) error {
 		if err != nil {
 			return err
@@ -132,8 +133,8 @@ func replaceAll(dir string, old, new string) error {
 		if err != nil {
 			return err
 		}
-		out := bytes.Replace(in, []byte(old), []byte(new), -1)
-		err = os.WriteFile(path, out, 0644)
+		out := bytes.ReplaceAll(in, []byte(text), []byte(replacement))
+		err = os.WriteFile(path, out, 0o644)
 		if err != nil {
 			return err
 		}

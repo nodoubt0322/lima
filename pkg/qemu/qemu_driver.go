@@ -43,20 +43,20 @@ func New(driver *driver.BaseDriver) *LimaQemuDriver {
 }
 
 func (l *LimaQemuDriver) Validate() error {
-	if *l.Yaml.MountType == limayaml.VIRTIOFS && runtime.GOOS != "linux" {
+	if *l.Instance.Config.MountType == limayaml.VIRTIOFS && runtime.GOOS != "linux" {
 		return fmt.Errorf("field `mountType` must be %q or %q for QEMU driver on non-Linux, got %q",
-			limayaml.REVSSHFS, limayaml.NINEP, *l.Yaml.MountType)
+			limayaml.REVSSHFS, limayaml.NINEP, *l.Instance.Config.MountType)
 	}
 	return nil
 }
 
-func (l *LimaQemuDriver) CreateDisk() error {
+func (l *LimaQemuDriver) CreateDisk(ctx context.Context) error {
 	qCfg := Config{
 		Name:        l.Instance.Name,
 		InstanceDir: l.Instance.Dir,
-		LimaYAML:    l.Yaml,
+		LimaYAML:    l.Instance.Config,
 	}
-	return EnsureDisk(qCfg)
+	return EnsureDisk(ctx, qCfg)
 }
 
 func (l *LimaQemuDriver) Start(ctx context.Context) (chan error, error) {
@@ -70,22 +70,22 @@ func (l *LimaQemuDriver) Start(ctx context.Context) (chan error, error) {
 	qCfg := Config{
 		Name:         l.Instance.Name,
 		InstanceDir:  l.Instance.Dir,
-		LimaYAML:     l.Yaml,
+		LimaYAML:     l.Instance.Config,
 		SSHLocalPort: l.SSHLocalPort,
 	}
-	qExe, qArgs, err := Cmdline(qCfg)
+	qExe, qArgs, err := Cmdline(ctx, qCfg)
 	if err != nil {
 		return nil, err
 	}
 
 	var vhostCmds []*exec.Cmd
-	if *l.Yaml.MountType == limayaml.VIRTIOFS {
+	if *l.Instance.Config.MountType == limayaml.VIRTIOFS {
 		vhostExe, err := FindVirtiofsd(qExe)
 		if err != nil {
 			return nil, err
 		}
 
-		for i := range l.Yaml.Mounts {
+		for i := range l.Instance.Config.Mounts {
 			args, err := VirtiofsdCmdline(qCfg, i)
 			if err != nil {
 				return nil, err
@@ -131,9 +131,6 @@ func (l *LimaQemuDriver) Start(ctx context.Context) (chan error, error) {
 	}
 
 	for i, vhostCmd := range vhostCmds {
-		i := i
-		vhostCmd := vhostCmd
-
 		logrus.Debugf("vhostCmd[%d].Args: %v", i, vhostCmd.Args)
 		if err := vhostCmd.Start(); err != nil {
 			return nil, err
@@ -189,9 +186,9 @@ func (l *LimaQemuDriver) Start(ctx context.Context) (chan error, error) {
 	}()
 	l.vhostCmds = vhostCmds
 	go func() {
-		if usernetIndex := limayaml.FirstUsernetIndex(l.Yaml); usernetIndex != -1 {
-			client := usernet.NewClientByName(l.Yaml.Networks[usernetIndex].Lima)
-			err := client.ConfigureDriver(l.BaseDriver)
+		if usernetIndex := limayaml.FirstUsernetIndex(l.Instance.Config); usernetIndex != -1 {
+			client := usernet.NewClientByName(l.Instance.Config.Networks[usernetIndex].Lima)
+			err := client.ConfigureDriver(ctx, l.BaseDriver)
 			if err != nil {
 				l.qWaitCh <- err
 			}
@@ -288,7 +285,7 @@ func (l *LimaQemuDriver) killVhosts() error {
 	var errs []error
 	for i, vhost := range l.vhostCmds {
 		if err := vhost.Process.Kill(); err != nil && !errors.Is(err, os.ErrProcessDone) {
-			errs = append(errs, fmt.Errorf("Failed to kill virtiofsd instance #%d: %w", i, err))
+			errs = append(errs, fmt.Errorf("failed to kill virtiofsd instance #%d: %w", i, err))
 		}
 	}
 
@@ -296,9 +293,10 @@ func (l *LimaQemuDriver) killVhosts() error {
 }
 
 func (l *LimaQemuDriver) shutdownQEMU(ctx context.Context, timeout time.Duration, qCmd *exec.Cmd, qWaitCh <-chan error) error {
-	logrus.Info("Shutting down QEMU with ACPI")
-	if usernetIndex := limayaml.FirstUsernetIndex(l.Yaml); usernetIndex != -1 {
-		client := usernet.NewClientByName(l.Yaml.Networks[usernetIndex].Lima)
+	// "power button" refers to ACPI on the most archs, except RISC-V
+	logrus.Info("Shutting down QEMU with the power button")
+	if usernetIndex := limayaml.FirstUsernetIndex(l.Instance.Config); usernetIndex != -1 {
+		client := usernet.NewClientByName(l.Instance.Config.Networks[usernetIndex].Lima)
 		err := client.UnExposeSSH(l.SSHLocalPort)
 		if err != nil {
 			logrus.Warnf("Failed to remove SSH binding for port %d", l.SSHLocalPort)
@@ -324,8 +322,12 @@ func (l *LimaQemuDriver) shutdownQEMU(ctx context.Context, timeout time.Duration
 	deadline := time.After(timeout)
 	select {
 	case qWaitErr := <-qWaitCh:
-		logrus.WithError(qWaitErr).Info("QEMU has exited")
-		l.removeVNCFiles()
+		entry := logrus.NewEntry(logrus.StandardLogger())
+		if qWaitErr != nil {
+			entry = entry.WithError(qWaitErr)
+		}
+		entry.Info("QEMU has exited")
+		_ = l.removeVNCFiles()
 		return errors.Join(qWaitErr, l.killVhosts())
 	case <-deadline:
 	}
@@ -344,9 +346,9 @@ func (l *LimaQemuDriver) killQEMU(_ context.Context, _ time.Duration, qCmd *exec
 	} else {
 		logrus.Info("QEMU has already exited")
 	}
-	qemuPIDPath := filepath.Join(l.Instance.Dir, filenames.PIDFile(*l.Yaml.VMType))
+	qemuPIDPath := filepath.Join(l.Instance.Dir, filenames.PIDFile(*l.Instance.Config.VMType))
 	_ = os.RemoveAll(qemuPIDPath)
-	l.removeVNCFiles()
+	_ = l.removeVNCFiles()
 	return errors.Join(qWaitErr, l.killVhosts())
 }
 
@@ -362,7 +364,7 @@ func (l *LimaQemuDriver) DeleteSnapshot(_ context.Context, tag string) error {
 	qCfg := Config{
 		Name:        l.Instance.Name,
 		InstanceDir: l.Instance.Dir,
-		LimaYAML:    l.Yaml,
+		LimaYAML:    l.Instance.Config,
 	}
 	return Del(qCfg, l.Instance.Status == store.StatusRunning, tag)
 }
@@ -371,7 +373,7 @@ func (l *LimaQemuDriver) CreateSnapshot(_ context.Context, tag string) error {
 	qCfg := Config{
 		Name:        l.Instance.Name,
 		InstanceDir: l.Instance.Dir,
-		LimaYAML:    l.Yaml,
+		LimaYAML:    l.Instance.Config,
 	}
 	return Save(qCfg, l.Instance.Status == store.StatusRunning, tag)
 }
@@ -380,7 +382,7 @@ func (l *LimaQemuDriver) ApplySnapshot(_ context.Context, tag string) error {
 	qCfg := Config{
 		Name:        l.Instance.Name,
 		InstanceDir: l.Instance.Dir,
-		LimaYAML:    l.Yaml,
+		LimaYAML:    l.Instance.Config,
 	}
 	return Load(qCfg, l.Instance.Status == store.StatusRunning, tag)
 }
@@ -389,9 +391,15 @@ func (l *LimaQemuDriver) ListSnapshots(_ context.Context) (string, error) {
 	qCfg := Config{
 		Name:        l.Instance.Name,
 		InstanceDir: l.Instance.Dir,
-		LimaYAML:    l.Yaml,
+		LimaYAML:    l.Instance.Config,
 	}
 	return List(qCfg, l.Instance.Status == store.StatusRunning)
+}
+
+func (l *LimaQemuDriver) GuestAgentConn(ctx context.Context) (net.Conn, error) {
+	var d net.Dialer
+	dialContext, err := d.DialContext(ctx, "unix", filepath.Join(l.Instance.Dir, filenames.GuestAgentSock))
+	return dialContext, err
 }
 
 type qArgTemplateApplier struct {
@@ -409,9 +417,9 @@ func (a *qArgTemplateApplier) applyTemplate(qArg string) (string, error) {
 				if !ok {
 					return "", fmt.Errorf("non-string argument %+v", v)
 				}
-				addr := &net.UnixAddr{
-					Net:  "unix",
-					Name: s,
+				addr, err := net.ResolveUnixAddr("unix", s)
+				if err != nil {
+					return "", err
 				}
 				conn, err := net.DialUnix("unix", nil, addr)
 				if err != nil {

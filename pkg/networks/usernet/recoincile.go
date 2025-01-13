@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/lima-vm/lima/pkg/executil"
 	"github.com/lima-vm/lima/pkg/lockutil"
 	"github.com/lima-vm/lima/pkg/store"
 	"github.com/lima-vm/lima/pkg/store/dirnames"
@@ -20,16 +21,16 @@ import (
 )
 
 // Start starts a instance a usernet network with the given name.
-// The name parameter must point to a valid network configuration name under <LIMA_HOME>/_config/networks.yaml with `mode: user-v2`
+// The name parameter must point to a valid network configuration name under <LIMA_HOME>/_config/networks.yaml with `mode: user-v2`.
 func Start(ctx context.Context, name string) error {
 	logrus.Debugf("Make sure usernet network is started")
 	networksDir, err := dirnames.LimaNetworksDir()
 	if err != nil {
 		return err
 	}
-	//usernet files contents are stored under {LIMA_HOME}/_networks/user-v2/<pid, fdsock, endpointsock, logs>
+	// usernet files contents are stored under {LIMA_HOME}/_networks/user-v2/<pid, fdsock, endpointsock, logs>
 	usernetDir := path.Join(networksDir, name)
-	if err := os.MkdirAll(usernetDir, 0755); err != nil {
+	if err := os.MkdirAll(usernetDir, 0o755); err != nil {
 		return err
 	}
 
@@ -70,15 +71,18 @@ func Start(ctx context.Context, name string) error {
 				return err
 			}
 			leasesString := mapToCliString(leases)
-			args := []string{"usernet", "-p", pidFile,
+			args := []string{
+				"usernet", "-p", pidFile,
 				"-e", endpointSock,
 				"--listen-qemu", qemuSock,
 				"--listen", fdSock,
-				"--subnet", subnet.String()}
+				"--subnet", subnet.String(),
+			}
 			if leasesString != "" {
 				args = append(args, "--leases", leasesString)
 			}
 			cmd := exec.CommandContext(ctx, self, args...)
+			cmd.SysProcAttr = executil.BackgroundSysProcAttr
 
 			stdoutPath := filepath.Join(usernetDir, fmt.Sprintf("%s.%s.%s.log", "usernet", name, "stdout"))
 			stderrPath := filepath.Join(usernetDir, fmt.Sprintf("%s.%s.%s.log", "usernet", name, "stderr"))
@@ -118,8 +122,8 @@ func Start(ctx context.Context, name string) error {
 }
 
 // Stop stops running instance a usernet network with the given name.
-// The name parameter must point to a valid network configuration name under <LIMA_HOME>/_config/networks.yaml with `mode: user-v2`
-func Stop(name string) error {
+// The name parameter must point to a valid network configuration name under <LIMA_HOME>/_config/networks.yaml with `mode: user-v2`.
+func Stop(ctx context.Context, name string) error {
 	logrus.Debugf("Make sure usernet network is stopped")
 	pidFile, err := PIDFile(name)
 	if err != nil {
@@ -130,7 +134,7 @@ func Stop(name string) error {
 	if pid != 0 {
 		logrus.Debugf("Stopping usernet daemon")
 
-		err = writeLeases(name)
+		err = writeLeases(ctx, name)
 		if err != nil {
 			return err
 		}
@@ -188,9 +192,9 @@ func readLeases(name string) (map[string]string, error) {
 	return leases, err
 }
 
-func writeLeases(nwName string) error {
+func writeLeases(ctx context.Context, nwName string) error {
 	client := NewClientByName(nwName)
-	leases, err := client.Leases()
+	leases, err := client.Leases(ctx)
 	if err != nil {
 		return err
 	}

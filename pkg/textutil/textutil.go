@@ -24,32 +24,30 @@ func ExecuteTemplate(tmpl string, args interface{}) ([]byte, error) {
 	return b.Bytes(), nil
 }
 
-// PrefixString adds prefix to beginning of each line
-func PrefixString(prefix string, text string) string {
-	result := []string{}
-	for _, line := range strings.Split(text, "\n") {
-		if line == "" {
-			result = append(result, "")
-			continue
+// PrefixString adds prefix to beginning of each line.
+func PrefixString(prefix, text string) string {
+	lines := strings.Split(text, "\n")
+	for i, line := range lines {
+		if line != "" {
+			lines[i] = prefix + line
 		}
-		result = append(result, prefix+line)
 	}
-	return strings.Join(result, "\n")
+	return strings.Join(lines, "\n")
 }
 
-// IndentString add spaces to beginning of each line
+// IndentString add spaces to beginning of each line.
 func IndentString(size int, text string) string {
 	prefix := strings.Repeat(" ", size)
 	return PrefixString(prefix, text)
 }
 
-// TrimString removes characters from beginning and end
-func TrimString(cutset string, text string) string {
+// TrimString removes characters from beginning and end.
+func TrimString(cutset, text string) string {
 	return strings.Trim(text, cutset)
 }
 
-// MissingString returns message if the text is empty
-func MissingString(message string, text string) string {
+// MissingString returns message if the text is empty.
+func MissingString(message, text string) string {
 	if text == "" {
 		return message
 	}
@@ -77,7 +75,7 @@ var TemplateFuncMap = template.FuncMap{
 	},
 	"indent": func(a ...interface{}) (string, error) {
 		if len(a) == 0 {
-			return "", errors.New("function takes at at least one string argument")
+			return "", errors.New("function takes at least one string argument")
 		}
 		if len(a) > 2 {
 			return "", errors.New("function takes at most 2 arguments")
@@ -97,7 +95,7 @@ var TemplateFuncMap = template.FuncMap{
 	},
 	"missing": func(a ...interface{}) (string, error) {
 		if len(a) == 0 {
-			return "", errors.New("function takes at at least one string argument")
+			return "", errors.New("function takes at least one string argument")
 		}
 		if len(a) > 2 {
 			return "", errors.New("function takes at most 2 arguments")
@@ -117,7 +115,7 @@ var TemplateFuncMap = template.FuncMap{
 	},
 }
 
-// TemplateFuncHelp is help for TemplateFuncMap.
+// FuncHelp is help for TemplateFuncMap.
 var FuncHelp = []string{
 	"indent <size>: add spaces to beginning of each line",
 	"missing <message>: return message if the text is empty",

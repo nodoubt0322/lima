@@ -1,5 +1,4 @@
 //go:build !darwin || no_vz
-// +build !darwin no_vz
 
 package vz
 
@@ -28,7 +27,7 @@ func (l *LimaVzDriver) Validate() error {
 	return ErrUnsupported
 }
 
-func (l *LimaVzDriver) CreateDisk() error {
+func (l *LimaVzDriver) CreateDisk(_ context.Context) error {
 	return ErrUnsupported
 }
 

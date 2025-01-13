@@ -15,12 +15,13 @@ import (
 )
 
 func newInstallSystemdCommand() *cobra.Command {
-	var installSystemdCommand = &cobra.Command{
+	installSystemdCommand := &cobra.Command{
 		Use:   "install-systemd",
 		Short: "install a systemd unit (user)",
 		RunE:  installSystemdAction,
 	}
 	installSystemdCommand.Flags().Int("vsock-port", 0, "use vsock server on specified port")
+	installSystemdCommand.Flags().String("virtio-port", "", "use virtio server instead a UNIX socket")
 	return installSystemdCommand
 }
 
@@ -29,7 +30,11 @@ func installSystemdAction(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return err
 	}
-	unit, err := generateSystemdUnit(vsockPort)
+	virtioPort, err := cmd.Flags().GetString("virtio-port")
+	if err != nil {
+		return err
+	}
+	unit, err := generateSystemdUnit(vsockPort, virtioPort)
 	if err != nil {
 		return err
 	}
@@ -38,17 +43,19 @@ func installSystemdAction(cmd *cobra.Command, _ []string) error {
 		logrus.Infof("File %q already exists, overwriting", unitPath)
 	} else {
 		unitDir := filepath.Dir(unitPath)
-		if err := os.MkdirAll(unitDir, 0755); err != nil {
+		if err := os.MkdirAll(unitDir, 0o755); err != nil {
 			return err
 		}
 	}
-	if err := os.WriteFile(unitPath, unit, 0644); err != nil {
+	if err := os.WriteFile(unitPath, unit, 0o644); err != nil {
 		return err
 	}
 	logrus.Infof("Written file %q", unitPath)
 	args := [][]string{
 		{"daemon-reload"},
-		{"enable", "--now", "lima-guestagent.service"},
+		{"enable", "lima-guestagent.service"},
+		{"start", "lima-guestagent.service"},
+		{"try-restart", "lima-guestagent.service"},
 	}
 	for _, args := range args {
 		cmd := exec.Command("systemctl", append([]string{"--system"}, args...)...)
@@ -66,7 +73,7 @@ func installSystemdAction(cmd *cobra.Command, _ []string) error {
 //go:embed lima-guestagent.TEMPLATE.service
 var systemdUnitTemplate string
 
-func generateSystemdUnit(vsockPort int) ([]byte, error) {
+func generateSystemdUnit(vsockPort int, virtioPort string) ([]byte, error) {
 	selfExeAbs, err := os.Executable()
 	if err != nil {
 		return nil, err
@@ -75,6 +82,9 @@ func generateSystemdUnit(vsockPort int) ([]byte, error) {
 	var args []string
 	if vsockPort != 0 {
 		args = append(args, fmt.Sprintf("--vsock-port %d", vsockPort))
+	}
+	if virtioPort != "" {
+		args = append(args, fmt.Sprintf("--virtio-port %s", virtioPort))
 	}
 
 	m := map[string]string{

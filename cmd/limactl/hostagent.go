@@ -10,8 +10,8 @@ import (
 	"os/signal"
 	"runtime"
 	"strconv"
+	"syscall"
 
-	"github.com/gorilla/mux"
 	"github.com/lima-vm/lima/pkg/hostagent"
 	"github.com/lima-vm/lima/pkg/hostagent/api/server"
 	"github.com/sirupsen/logrus"
@@ -19,7 +19,7 @@ import (
 )
 
 func newHostagentCommand() *cobra.Command {
-	var hostagentCommand = &cobra.Command{
+	hostagentCommand := &cobra.Command{
 		Use:    "hostagent INSTANCE",
 		Short:  "run hostagent",
 		Args:   WrapArgsError(cobra.ExactArgs(1)),
@@ -42,7 +42,7 @@ func hostagentAction(cmd *cobra.Command, args []string) error {
 		if _, err := os.Stat(pidfile); !errors.Is(err, os.ErrNotExist) {
 			return fmt.Errorf("pidfile %q already exists", pidfile)
 		}
-		if err := os.WriteFile(pidfile, []byte(strconv.Itoa(os.Getpid())+"\n"), 0644); err != nil {
+		if err := os.WriteFile(pidfile, []byte(strconv.Itoa(os.Getpid())+"\n"), 0o644); err != nil {
 			return err
 		}
 		defer os.RemoveAll(pidfile)
@@ -52,7 +52,7 @@ func hostagentAction(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	if socket == "" {
-		return fmt.Errorf("socket must be specified (limactl version mismatch?)")
+		return errors.New("socket must be specified (limactl version mismatch?)")
 	}
 
 	instName := args[0]
@@ -62,13 +62,13 @@ func hostagentAction(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	if runGUI {
-		//Without this the call to vz.RunGUI fails. Adding it here, as this has to be called before the vz cgo loads.
+		// Without this the call to vz.RunGUI fails. Adding it here, as this has to be called before the vz cgo loads.
 		runtime.LockOSThread()
 		defer runtime.UnlockOSThread()
 	}
 
-	sigintCh := make(chan os.Signal, 1)
-	signal.Notify(sigintCh, os.Interrupt)
+	signalCh := make(chan os.Signal, 1)
+	signal.Notify(signalCh, os.Interrupt, syscall.SIGTERM)
 
 	stdout := &syncWriter{w: cmd.OutOrStdout()}
 	stderr := &syncWriter{w: cmd.ErrOrStderr()}
@@ -82,7 +82,7 @@ func hostagentAction(cmd *cobra.Command, args []string) error {
 	if nerdctlArchive != "" {
 		opts = append(opts, hostagent.WithNerdctlArchive(nerdctlArchive))
 	}
-	ha, err := hostagent.New(instName, stdout, sigintCh, opts...)
+	ha, err := hostagent.New(instName, stdout, signalCh, opts...)
 	if err != nil {
 		return err
 	}
@@ -90,7 +90,7 @@ func hostagentAction(cmd *cobra.Command, args []string) error {
 	backend := &server.Backend{
 		Agent: ha,
 	}
-	r := mux.NewRouter()
+	r := http.NewServeMux()
 	server.AddRoutes(r, backend)
 	srv := &http.Server{Handler: r}
 	err = os.RemoveAll(socket)
@@ -105,14 +105,14 @@ func hostagentAction(cmd *cobra.Command, args []string) error {
 	go func() {
 		defer os.RemoveAll(socket)
 		defer srv.Close()
-		if serveErr := srv.Serve(l); serveErr != nil {
+		if serveErr := srv.Serve(l); serveErr != http.ErrServerClosed {
 			logrus.WithError(serveErr).Warn("hostagent API server exited with an error")
 		}
 	}()
 	return ha.Run(cmd.Context())
 }
 
-// syncer is implemented by *os.File
+// syncer is implemented by *os.File.
 type syncer interface {
 	Sync() error
 }

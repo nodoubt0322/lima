@@ -8,7 +8,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/alessio/shellescape"
+	"al.essio.dev/pkg/shellescape"
+	"github.com/coreos/go-semver/semver"
 	"github.com/lima-vm/lima/pkg/sshutil"
 	"github.com/lima-vm/lima/pkg/store"
 	"github.com/mattn/go-isatty"
@@ -21,7 +22,7 @@ import (
 // in place of the 'ssh' executable.
 const envShellSSH = "SSH"
 
-var shellHelp = `Execute shell in Lima
+const shellHelp = `Execute shell in Lima
 
 lima command is provided as an alias for limactl shell $LIMA_INSTANCE. $LIMA_INSTANCE defaults to "` + DefaultInstanceName + `".
 
@@ -32,7 +33,7 @@ Hint: try --debug to show the detailed logs, if it seems hanging (mostly due to 
 `
 
 func newShellCommand() *cobra.Command {
-	var shellCmd = &cobra.Command{
+	shellCmd := &cobra.Command{
 		Use:               "shell [flags] INSTANCE [COMMAND...]",
 		Short:             "Execute shell in Lima",
 		Long:              shellHelp,
@@ -40,6 +41,7 @@ func newShellCommand() *cobra.Command {
 		RunE:              shellAction,
 		ValidArgsFunction: shellBashComplete,
 		SilenceErrors:     true,
+		GroupID:           basicCommand,
 	}
 
 	shellCmd.Flags().SetInterspersed(false)
@@ -77,10 +79,6 @@ func shellAction(cmd *cobra.Command, args []string) error {
 	if inst.Status == store.StatusStopped {
 		return fmt.Errorf("instance %q is stopped, run `limactl start %s` to start the instance", instName, instName)
 	}
-	y, err := inst.LoadYAML()
-	if err != nil {
-		return err
-	}
 
 	// When workDir is explicitly set, the shell MUST have workDir as the cwd, or exit with an error.
 	//
@@ -94,7 +92,7 @@ func shellAction(cmd *cobra.Command, args []string) error {
 	if workDir != "" {
 		changeDirCmd = fmt.Sprintf("cd %s || exit 1", shellescape.Quote(workDir))
 		// FIXME: check whether y.Mounts contains the home, not just len > 0
-	} else if len(y.Mounts) > 0 {
+	} else if len(inst.Config.Mounts) > 0 {
 		hostCurrentDir, err := os.Getwd()
 		if err == nil {
 			changeDirCmd = fmt.Sprintf("cd %s", shellescape.Quote(hostCurrentDir))
@@ -168,7 +166,13 @@ func shellAction(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	sshOpts, err := sshutil.SSHOpts(inst.Dir, *y.SSH.LoadDotSSHPubKeys, *y.SSH.ForwardAgent, *y.SSH.ForwardX11, *y.SSH.ForwardX11Trusted)
+	sshOpts, err := sshutil.SSHOpts(
+		inst.Dir,
+		*inst.Config.User.Name,
+		*inst.Config.SSH.LoadDotSSHPubKeys,
+		*inst.Config.SSH.ForwardAgent,
+		*inst.Config.SSH.ForwardX11,
+		*inst.Config.SSH.ForwardX11Trusted)
 	if err != nil {
 		return err
 	}
@@ -179,10 +183,17 @@ func shellAction(cmd *cobra.Command, args []string) error {
 	}
 	if _, present := os.LookupEnv("COLORTERM"); present {
 		// SendEnv config is cumulative, with already existing options in ssh_config
-		sshArgs = append(sshArgs, "-o", "SendEnv=\"COLORTERM\"")
+		sshArgs = append(sshArgs, "-o", "SendEnv=COLORTERM")
+	}
+	logLevel := "ERROR"
+	// For versions older than OpenSSH 8.9p, LogLevel=QUIET was needed to
+	// avoid the "Shared connection to 127.0.0.1 closed." message with -t.
+	olderSSH := sshutil.DetectOpenSSHVersion().LessThan(*semver.New("8.9.0"))
+	if olderSSH {
+		logLevel = "QUIET"
 	}
 	sshArgs = append(sshArgs, []string{
-		"-q",
+		"-o", fmt.Sprintf("LogLevel=%s", logLevel),
 		"-p", strconv.Itoa(inst.SSHLocalPort),
 		inst.SSHAddress,
 		"--",
