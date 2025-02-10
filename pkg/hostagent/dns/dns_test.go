@@ -15,13 +15,15 @@ import (
 	"gotest.tools/v3/assert/cmp"
 )
 
-var (
-	dnsResult *dns.Msg
-)
+var dnsResult *dns.Msg
 
 func TestDNSRecords(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		// "On Windows, the resolver always uses C library functions, such as GetAddrInfo and DnsQuery."
+		t.Skip()
+	}
 
-	srv, _ := mockdns.NewServerWithLogger(map[string]mockdns.Zone{
+	srv, err := mockdns.NewServerWithLogger(map[string]mockdns.Zone{
 		"onerecord.com.": {
 			TXT: []string{"My txt record"},
 		},
@@ -35,12 +37,9 @@ func TestDNSRecords(t *testing.T) {
 			TXT: []string{"record 1", "record 2"},
 		},
 	}, log.New(io.Discard, "mockdns server: ", log.LstdFlags), false)
+	assert.NilError(t, err)
 	defer srv.Close()
 
-	if runtime.GOOS == "windows" {
-		// "On Windows, the resolver always uses C library functions, such as GetAddrInfo and DnsQuery."
-		t.Skip()
-	}
 	srv.PatchNet(net.DefaultResolver)
 	defer mockdns.UnpatchNet(net.DefaultResolver)
 	w := new(TestResponseWriter)
@@ -120,8 +119,7 @@ func TestDNSRecords(t *testing.T) {
 	})
 }
 
-type TestResponseWriter struct {
-}
+type TestResponseWriter struct{}
 
 // LocalAddr returns the net.Addr of the server
 func (r TestResponseWriter) LocalAddr() net.Addr {
@@ -168,6 +166,7 @@ type TestAddr struct{}
 func (r TestAddr) Network() string {
 	return ""
 }
+
 func (r TestAddr) String() string {
 	return ""
 }
