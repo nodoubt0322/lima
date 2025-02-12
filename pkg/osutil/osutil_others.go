@@ -1,5 +1,4 @@
 //go:build !linux && !windows
-// +build !linux,!windows
 
 package osutil
 
@@ -11,9 +10,9 @@ import (
 // UnixPathMax is the value of UNIX_PATH_MAX.
 const UnixPathMax = 104
 
-// Stat is a selection of syscall.Stat_t
+// Stat is a selection of syscall.Stat_t.
 type Stat struct {
-	Uid uint32 //nolint:revive
+	Uid uint32
 	Gid uint32
 }
 

@@ -1,5 +1,4 @@
 //go:build !windows || no_wsl
-// +build !windows no_wsl
 
 package wsl2
 
@@ -28,7 +27,7 @@ func (l *LimaWslDriver) Validate() error {
 	return ErrUnsupported
 }
 
-func (l *LimaWslDriver) CreateDisk() error {
+func (l *LimaWslDriver) CreateDisk(_ context.Context) error {
 	return ErrUnsupported
 }
 

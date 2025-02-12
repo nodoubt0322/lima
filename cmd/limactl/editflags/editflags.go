@@ -22,7 +22,7 @@ func registerEdit(cmd *cobra.Command, commentPrefix string) {
 	flags := cmd.Flags()
 
 	flags.Int("cpus", 0, commentPrefix+"number of CPUs") // Similar to colima's --cpu, but the flag name is slightly different (cpu vs cpus)
-	_ = cmd.RegisterFlagCompletionFunc("cpus", func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	_ = cmd.RegisterFlagCompletionFunc("cpus", func(*cobra.Command, []string, string) ([]string, cobra.ShellCompDirective) {
 		var res []string
 		for _, f := range completeCPUs(runtime.NumCPU()) {
 			res = append(res, strconv.Itoa(f))
@@ -33,7 +33,7 @@ func registerEdit(cmd *cobra.Command, commentPrefix string) {
 	flags.IPSlice("dns", nil, commentPrefix+"specify custom DNS (disable host resolver)") // colima-compatible
 
 	flags.Float32("memory", 0, commentPrefix+"memory in GiB") // colima-compatible
-	_ = cmd.RegisterFlagCompletionFunc("memory", func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	_ = cmd.RegisterFlagCompletionFunc("memory", func(*cobra.Command, []string, string) ([]string, cobra.ShellCompDirective) {
 		var res []string
 		for _, f := range completeMemoryGiB(memory.TotalMemory()) {
 			res = append(res, fmt.Sprintf("%.1f", f))
@@ -44,14 +44,15 @@ func registerEdit(cmd *cobra.Command, commentPrefix string) {
 	flags.StringSlice("mount", nil, commentPrefix+"directories to mount, suffix ':w' for writable (Do not specify directories that overlap with the existing mounts)") // colima-compatible
 
 	flags.String("mount-type", "", commentPrefix+"mount type (reverse-sshfs, 9p, virtiofs)") // Similar to colima's --mount-type=(sshfs|9p|virtiofs), but "reverse-sshfs" is Lima is called "sshfs" in colima
-	_ = cmd.RegisterFlagCompletionFunc("mount-type", func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	_ = cmd.RegisterFlagCompletionFunc("mount-type", func(*cobra.Command, []string, string) ([]string, cobra.ShellCompDirective) {
 		return []string{"reverse-sshfs", "9p", "virtiofs"}, cobra.ShellCompDirectiveNoFileComp
 	})
 
 	flags.Bool("mount-writable", false, commentPrefix+"make all mounts writable")
+	flags.Bool("mount-inotify", false, commentPrefix+"enable inotify for mounts")
 
 	flags.StringSlice("network", nil, commentPrefix+"additional networks, e.g., \"vzNAT\" or \"lima:shared\" to assign vmnet IP")
-	_ = cmd.RegisterFlagCompletionFunc("network", func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	_ = cmd.RegisterFlagCompletionFunc("network", func(*cobra.Command, []string, string) ([]string, cobra.ShellCompDirective) {
 		// TODO: retrieve the lima:* network list from networks.yaml
 		return []string{"lima:shared", "lima:bridged", "lima:host", "lima:user-v2", "vzNAT"}, cobra.ShellCompDirectiveNoFileComp
 	})
@@ -70,22 +71,22 @@ func RegisterCreate(cmd *cobra.Command, commentPrefix string) {
 	flags := cmd.Flags()
 
 	flags.String("arch", "", commentPrefix+"machine architecture (x86_64, aarch64, riscv64)") // colima-compatible
-	_ = cmd.RegisterFlagCompletionFunc("arch", func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	_ = cmd.RegisterFlagCompletionFunc("arch", func(*cobra.Command, []string, string) ([]string, cobra.ShellCompDirective) {
 		return []string{"x86_64", "aarch64", "riscv64"}, cobra.ShellCompDirectiveNoFileComp
 	})
 
 	flags.String("containerd", "", commentPrefix+"containerd mode (user, system, user+system, none)")
-	_ = cmd.RegisterFlagCompletionFunc("vm-type", func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	_ = cmd.RegisterFlagCompletionFunc("vm-type", func(*cobra.Command, []string, string) ([]string, cobra.ShellCompDirective) {
 		return []string{"user", "system", "user+system", "none"}, cobra.ShellCompDirectiveNoFileComp
 	})
 
 	flags.Float32("disk", 0, commentPrefix+"disk size in GiB") // colima-compatible
-	_ = cmd.RegisterFlagCompletionFunc("memory", func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	_ = cmd.RegisterFlagCompletionFunc("memory", func(*cobra.Command, []string, string) ([]string, cobra.ShellCompDirective) {
 		return []string{"10", "30", "50", "100", "200"}, cobra.ShellCompDirectiveNoFileComp
 	})
 
 	flags.String("vm-type", "", commentPrefix+"virtual machine type (qemu, vz)") // colima-compatible
-	_ = cmd.RegisterFlagCompletionFunc("vm-type", func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	_ = cmd.RegisterFlagCompletionFunc("vm-type", func(*cobra.Command, []string, string) ([]string, cobra.ShellCompDirective) {
 		return []string{"qemu", "vz"}, cobra.ShellCompDirectiveNoFileComp
 	})
 
@@ -109,7 +110,8 @@ func YQExpressions(flags *flag.FlagSet, newInstance bool) ([]string, error) {
 	d := defaultExprFunc
 	defs := []def{
 		{"cpus", d(".cpus = %s"), false, false},
-		{"dns",
+		{
+			"dns",
 			func(_ *flag.Flag) (string, error) {
 				ipSlice, err := flags.GetIPSlice("dns")
 				if err != nil {
@@ -127,9 +129,11 @@ func YQExpressions(flags *flag.FlagSet, newInstance bool) ([]string, error) {
 				return expr, nil
 			},
 			false,
-			false},
+			false,
+		},
 		{"memory", d(".memory = \"%sGiB\""), false, false},
-		{"mount",
+		{
+			"mount",
 			func(_ *flag.Flag) (string, error) {
 				ss, err := flags.GetStringSlice("mount")
 				if err != nil {
@@ -148,10 +152,13 @@ func YQExpressions(flags *flag.FlagSet, newInstance bool) ([]string, error) {
 				return expr, nil
 			},
 			false,
-			false},
+			false,
+		},
 		{"mount-type", d(".mountType = %q"), false, false},
+		{"mount-inotify", d(".mountInotify = %s"), false, true},
 		{"mount-writable", d(".mounts[].writable = %s"), false, false},
-		{"network",
+		{
+			"network",
 			func(_ *flag.Flag) (string, error) {
 				ss, err := flags.GetStringSlice("network")
 				if err != nil {
@@ -177,8 +184,10 @@ func YQExpressions(flags *flag.FlagSet, newInstance bool) ([]string, error) {
 				return expr, nil
 			},
 			false,
-			false},
-		{"rosetta",
+			false,
+		},
+		{
+			"rosetta",
 			func(_ *flag.Flag) (string, error) {
 				b, err := flags.GetBool("rosetta")
 				if err != nil {
@@ -187,9 +196,11 @@ func YQExpressions(flags *flag.FlagSet, newInstance bool) ([]string, error) {
 				return fmt.Sprintf(".rosetta.enabled = %v | .rosetta.binfmt = %v", b, b), nil
 			},
 			false,
-			true},
+			false,
+		},
 		{"set", d("%s"), false, false},
-		{"video",
+		{
+			"video",
 			func(_ *flag.Flag) (string, error) {
 				b, err := flags.GetBool("video")
 				if err != nil {
@@ -201,9 +212,11 @@ func YQExpressions(flags *flag.FlagSet, newInstance bool) ([]string, error) {
 				return ".video.display = \"none\"", nil
 			},
 			false,
-			false},
+			false,
+		},
 		{"arch", d(".arch = %q"), true, false},
-		{"containerd",
+		{
+			"containerd",
 			func(_ *flag.Flag) (string, error) {
 				s, err := flags.GetString("containerd")
 				if err != nil {
@@ -223,8 +236,8 @@ func YQExpressions(flags *flag.FlagSet, newInstance bool) ([]string, error) {
 				}
 			},
 			true,
-			false},
-
+			false,
+		},
 		{"disk", d(".disk= \"%sGiB\""), true, false},
 		{"vm-type", d(".vmType = %q"), true, false},
 		{"plain", d(".plain = %s"), true, false},

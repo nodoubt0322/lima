@@ -14,9 +14,11 @@ import (
 
 const separator = string(filepath.Separator)
 
-var vmtype = limayaml.QEMU
-var goarch = limayaml.NewArch(runtime.GOARCH)
-var space = strings.Repeat(" ", len(goarch)-4)
+var (
+	vmtype = limayaml.QEMU
+	goarch = limayaml.NewArch(runtime.GOARCH)
+	space  = strings.Repeat(" ", len(goarch)-4)
+)
 
 var instance = Instance{
 	Name:       "foo",
@@ -63,7 +65,8 @@ var tableTwo = "NAME    STATUS     SSH            VMTYPE    ARCH       CPUS    M
 func TestPrintInstanceTable(t *testing.T) {
 	var buf bytes.Buffer
 	instances := []*Instance{&instance}
-	PrintInstances(&buf, instances, "table", nil)
+	err := PrintInstances(&buf, instances, "table", nil)
+	assert.NilError(t, err)
 	assert.Equal(t, table, buf.String())
 }
 
@@ -72,7 +75,8 @@ func TestPrintInstanceTableEmu(t *testing.T) {
 	instance1 := instance
 	instance1.Arch = "unknown"
 	instances := []*Instance{&instance1}
-	PrintInstances(&buf, instances, "table", nil)
+	err := PrintInstances(&buf, instances, "table", nil)
+	assert.NilError(t, err)
 	assert.Equal(t, tableEmu, buf.String())
 }
 
@@ -83,7 +87,8 @@ func TestPrintInstanceTableHome(t *testing.T) {
 	instance1 := instance
 	instance1.Dir = filepath.Join(u.HomeDir, "dir")
 	instances := []*Instance{&instance1}
-	PrintInstances(&buf, instances, "table", nil)
+	err = PrintInstances(&buf, instances, "table", nil)
+	assert.NilError(t, err)
 	assert.Equal(t, tableHome, buf.String())
 }
 
@@ -91,7 +96,8 @@ func TestPrintInstanceTable60(t *testing.T) {
 	var buf bytes.Buffer
 	instances := []*Instance{&instance}
 	options := PrintOptions{TerminalWidth: 60}
-	PrintInstances(&buf, instances, "table", &options)
+	err := PrintInstances(&buf, instances, "table", &options)
+	assert.NilError(t, err)
 	assert.Equal(t, table60, buf.String())
 }
 
@@ -99,7 +105,8 @@ func TestPrintInstanceTable80SameArch(t *testing.T) {
 	var buf bytes.Buffer
 	instances := []*Instance{&instance}
 	options := PrintOptions{TerminalWidth: 80}
-	PrintInstances(&buf, instances, "table", &options)
+	err := PrintInstances(&buf, instances, "table", &options)
+	assert.NilError(t, err)
 	assert.Equal(t, table80i, buf.String())
 }
 
@@ -109,7 +116,8 @@ func TestPrintInstanceTable80DiffArch(t *testing.T) {
 	instance1.Arch = limayaml.NewArch("unknown")
 	instances := []*Instance{&instance1}
 	options := PrintOptions{TerminalWidth: 80}
-	PrintInstances(&buf, instances, "table", &options)
+	err := PrintInstances(&buf, instances, "table", &options)
+	assert.NilError(t, err)
 	assert.Equal(t, table80d, buf.String())
 }
 
@@ -117,7 +125,8 @@ func TestPrintInstanceTable100(t *testing.T) {
 	var buf bytes.Buffer
 	instances := []*Instance{&instance}
 	options := PrintOptions{TerminalWidth: 100}
-	PrintInstances(&buf, instances, "table", &options)
+	err := PrintInstances(&buf, instances, "table", &options)
+	assert.NilError(t, err)
 	assert.Equal(t, table100, buf.String())
 }
 
@@ -125,7 +134,8 @@ func TestPrintInstanceTableAll(t *testing.T) {
 	var buf bytes.Buffer
 	instances := []*Instance{&instance}
 	options := PrintOptions{TerminalWidth: 40, AllFields: true}
-	PrintInstances(&buf, instances, "table", &options)
+	err := PrintInstances(&buf, instances, "table", &options)
+	assert.NilError(t, err)
 	assert.Equal(t, tableAll, buf.String())
 }
 
@@ -141,6 +151,7 @@ func TestPrintInstanceTableTwo(t *testing.T) {
 	instance2.Arch = limayaml.AARCH64
 	instances := []*Instance{&instance1, &instance2}
 	options := PrintOptions{TerminalWidth: 80}
-	PrintInstances(&buf, instances, "table", &options)
+	err := PrintInstances(&buf, instances, "table", &options)
+	assert.NilError(t, err)
 	assert.Equal(t, tableTwo, buf.String())
 }
