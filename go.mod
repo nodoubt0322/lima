@@ -16,7 +16,6 @@ require (
 	github.com/containers/gvisor-tap-vsock v0.8.6 // gomodjail:unconfined
 	github.com/coreos/go-semver v0.3.1
 	github.com/cpuguy83/go-md2man/v2 v2.0.7
-	github.com/cyphar/filepath-securejoin v0.4.1
 	github.com/digitalocean/go-qemu v0.0.0-20221209210016-f035778c97f7
 	github.com/diskfs/go-diskfs v1.6.0 // gomodjail:unconfined
 	github.com/docker/go-units v0.5.0
@@ -51,9 +50,9 @@ require (
 	google.golang.org/protobuf v1.36.6 // gomodjail:unconfined
 	gopkg.in/op/go-logging.v1 v1.0.0-20160211212156-b2cb9fa56473
 	gotest.tools/v3 v3.5.2
-	k8s.io/api v0.32.4
-	k8s.io/apimachinery v0.32.4
-	k8s.io/client-go v0.32.4
+	k8s.io/api v0.32.5
+	k8s.io/apimachinery v0.32.5
+	k8s.io/client-go v0.32.5
 )
 
 require (
